@@ -103,3 +103,7 @@ run_backend_tests.sh
 
 .cursor/rules
 .obsidian
+node_modules
+package-lock.json
+
+

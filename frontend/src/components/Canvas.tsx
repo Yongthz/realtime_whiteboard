@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState } from 'react'
+import React, { useRef, useEffect, useState, useCallback } from 'react'
 import { useWhiteboard } from '../contexts/WhiteboardContext'
 import { useWASM } from '../hooks/useWasm'
 import type { Point } from '../interfaces/canvas'
@@ -7,6 +7,45 @@ import {
   ToolDebugger, 
   EventDebugger
 } from '../utils/debug'
+import { useWebSocket } from '../hooks/useWebSocket';
+import type { Stroke, Message } from '../../../shared/types/messages';
+import { v4 as uuidv4 } from 'uuid'; // For unique stroke IDs (install with `npm i uuid`)
+
+function ChatBox({ chatMessages, sendChat, myUserId, myUsername }: {
+  chatMessages: { userId: string; username: string; message: string }[];
+  sendChat: (message: string) => void;
+  myUserId: string;
+  myUsername: string;
+}) {
+  const [input, setInput] = useState('');
+
+  const handleSend = () => {
+    if (input.trim()) {
+      sendChat(input.trim());
+      setInput('');
+    }
+  };
+
+  return (
+    <div style={{ border: '1px solid #aaa', padding: 8, marginTop: 16, width: 300 }}>
+      <div style={{ maxHeight: 120, overflowY: 'auto', marginBottom: 8 }}>
+        {chatMessages.map((msg, idx) => (
+          <div key={idx} style={{ color: msg.userId === myUserId ? 'blue' : 'black' }}>
+            <b>{msg.username}:</b> {msg.message}
+          </div>
+        ))}
+      </div>
+      <input
+        value={input}
+        onChange={e => setInput(e.target.value)}
+        onKeyDown={e => { if (e.key === 'Enter') handleSend(); }}
+        placeholder="Type a message…"
+        style={{ width: '80%' }}
+      />
+      <button onClick={handleSend} style={{ width: '18%' }}>Send</button>
+    </div>
+  );
+}
 
 export const Canvas: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -26,11 +65,60 @@ export const Canvas: React.FC = () => {
     moveSelectedStrokes,
     deleteSelectedStrokes,
     clearCanvas,
-    triggerStrokeUpdate
+    triggerStrokeUpdate,
+    addStroke, // <-- import from context
+    setAllStrokes // <-- import from context
   } = useWhiteboard()
   
   // Get direct access to WASM engine for faster shape creation
   const { drawingEngine: wasmEngine } = useWASM()
+
+  const myUserId = useRef(uuidv4()).current;
+  const [chatMessages, setChatMessages] = useState<{ userId: string; username: string; message: string }[]>([]);
+  const myUsername = "Anonymous"; // Replace with real username logic if you want
+
+  const handleMessage = useCallback((msg: Message) => {
+    switch (msg.type) {
+      case 'stroke:add': {
+        // Convert color to string for frontend Stroke
+        const s = msg.payload.stroke;
+        const colorStr = `rgb(${s.color.r}, ${s.color.g}, ${s.color.b})`;
+        addStroke({
+          points: s.points,
+          color: colorStr,
+          thickness: s.thickness
+        });
+        break;
+      }
+      case 'board:sync': {
+        // Convert all strokes' color to string
+        const strokes = msg.payload.strokes.map(s => ({
+          points: s.points,
+          color: `rgb(${s.color.r}, ${s.color.g}, ${s.color.b})`,
+          thickness: s.thickness
+        }));
+        setAllStrokes(strokes);
+        break;
+      }
+      case 'chat:message':
+        setChatMessages(prev => [...prev, msg.payload]);
+        break;
+      case 'chat:sync':
+        setChatMessages(msg.payload.chatHistory);
+        break;
+      default:
+        break;
+    }
+  }, [addStroke, setAllStrokes]);
+
+  const { send } = useWebSocket(handleMessage);
+
+  // When user finishes drawing:
+  const onFinishDrawing = (points: Point[], color: any, thickness: number) => {
+    const strokeMsg: Message = { type: 'stroke:add', payload: { stroke: { id: uuidv4(), points, color, thickness, userId: myUserId } } };
+    console.log('Sending stroke to server:', strokeMsg);
+    send(strokeMsg);
+  };
 
   // Debug: Log state changes
   useEffect(() => {
@@ -446,6 +534,17 @@ export const Canvas: React.FC = () => {
     return <div>Loading WASM...</div>
   }
 
+  const sendChat = (message: string) => {
+    send({
+      type: 'chat:message',
+      payload: {
+        userId: myUserId,
+        username: myUsername,
+        message
+      }
+    });
+  };
+
   return (
     <>
       <div style={{ margin: "1em 0" }}>
@@ -487,6 +586,12 @@ export const Canvas: React.FC = () => {
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerLeave={handlePointerUp}
+      />
+      <ChatBox
+        chatMessages={chatMessages}
+        sendChat={sendChat}
+        myUserId={myUserId}
+        myUsername={myUsername}
       />
     </>
   )

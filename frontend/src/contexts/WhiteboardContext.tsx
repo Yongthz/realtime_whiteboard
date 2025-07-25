@@ -181,6 +181,10 @@ interface WhiteboardContextType {
   startDrawing: (point: Point) => void;
   continueDrawing: (point: Point) => void;
   finishDrawing: () => void;
+
+  // Add these methods for real-time sync
+  addStroke: (stroke: Stroke) => void;
+  setAllStrokes: (strokes: Stroke[]) => void;
   
   // Eraser operations
   eraseAtPoint: (point: Point) => void;
@@ -429,6 +433,16 @@ export const WhiteboardProvider: React.FC<WhiteboardProviderProps> = ({ children
     dispatch({ type: 'SET_CURRENT_STROKE', payload: null });
   }, [state.currentStroke, wasmEngine]);
   
+  // Add a single stroke to the state
+  const addStroke = useCallback((stroke: Stroke) => {
+    dispatch({ type: 'SET_STROKES', payload: [...state.strokes, stroke] });
+  }, [state.strokes]);
+
+  // Replace all strokes in the state
+  const setAllStrokes = useCallback((strokes: Stroke[]) => {
+    dispatch({ type: 'SET_STROKES', payload: strokes });
+  }, []);
+  
   // Eraser operations
   const eraseAtPoint = useCallback(async (point: Point) => {
     if (!isLoaded) return;
@@ -538,7 +552,9 @@ export const WhiteboardProvider: React.FC<WhiteboardProviderProps> = ({ children
     clearCanvas,
     exportCanvas,
     triggerStrokeUpdate,
-    syncStrokesFromWasm
+    syncStrokesFromWasm,
+    addStroke, // Exported for WebSocket sync
+    setAllStrokes // Exported for WebSocket sync
   };
   
   return (
